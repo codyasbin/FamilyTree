@@ -136,6 +136,20 @@ function zoomAt(factor) { view.scale = Math.max(.35, Math.min(1.8, view.scale * 
 function openPersonModal() { $('personModal').classList.add('open'); setTimeout(() => $('personForm').elements.name.focus(), 50); }
 function closePersonModal() { $('personModal').classList.remove('open'); }
 function closeMobileNav() { $('sidebar').classList.remove('mobile-open'); $('sidebarScrim').classList.remove('open'); }
+function openConnectionModal() {
+  const selected = person(state.selectedId);
+  if (!selected) return;
+  const connectedIds = new Set(relatives(selected.id).map((item) => item.person.id));
+  const available = state.nodes.filter((node) => node.id !== selected.id && !connectedIds.has(node.id));
+  $('connectionDescription').textContent = `Connect an existing person to ${selected.name}.`;
+  $('connectionPerson').innerHTML = available.length
+    ? available.map((node) => `<option value="${escapeHtml(node.id)}">${escapeHtml(node.name)}${node.birth ? ` (${escapeHtml(node.birth)})` : ''}</option>`).join('')
+    : '<option value="">Everyone is already connected</option>';
+  $('connectionPerson').disabled = !available.length;
+  $('connectionForm').querySelector('button[type="submit"]').disabled = !available.length;
+  $('connectionModal').classList.add('open');
+}
+function closeConnectionModal() { $('connectionModal').classList.remove('open'); }
 function openPhotoViewer(src, name) { if (!src) return; $('fullSizePhoto').src = src; $('fullSizePhoto').alt = `${name} portrait`; $('photoCaption').textContent = name; $('photoViewer').classList.add('open'); $('closePhotoViewer').focus(); }
 function closePhotoViewer() { $('photoViewer').classList.remove('open'); $('fullSizePhoto').removeAttribute('src'); }
 
@@ -143,8 +157,18 @@ $('zoomInButton').addEventListener('click', () => zoomAt(1.12)); $('zoomOutButto
 $('fitButton').addEventListener('click', () => { view = { ...view, x: 35, y: 42, scale: .76 }; applyView(); });
 $('searchInput').addEventListener('input', renderNodes);
 document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
-$('addPersonButton').addEventListener('click', openPersonModal); $('contentAddButton').addEventListener('click', openPersonModal); $('addRelationButton').addEventListener('click', openPersonModal);
+$('addPersonButton').addEventListener('click', openPersonModal); $('contentAddButton').addEventListener('click', openPersonModal); $('addRelationButton').addEventListener('click', openConnectionModal);
 document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closePersonModal)); $('personModal').addEventListener('click', (event) => { if (event.target === $('personModal')) closePersonModal(); });
+$('connectionForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const selected = person(state.selectedId), other = person($('connectionPerson').value), type = $('connectionType').value;
+  if (!selected || !other) return;
+  const relation = type === 'parent' ? [other.id, selected.id, 'parent'] : type === 'child' ? [selected.id, other.id, 'parent'] : [selected.id, other.id, type];
+  if (state.relations.some((item) => (item[0] === selected.id && item[1] === other.id) || (item[0] === other.id && item[1] === selected.id))) return toast('These people are already connected');
+  state.relations.push(relation); snapshot(); closeConnectionModal(); render(); toast(`${other.name} connected to ${selected.name}`);
+});
+document.querySelectorAll('[data-close-connection]').forEach((button) => button.addEventListener('click', closeConnectionModal));
+$('connectionModal').addEventListener('click', (event) => { if (event.target === $('connectionModal')) closeConnectionModal(); });
 $('personForm').addEventListener('submit', (event) => {
   event.preventDefault(); const data = new FormData(event.currentTarget), name = data.get('name').trim(), selected = person(state.selectedId) || state.nodes[0], relation = data.get('relation'), id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
   const x = selected.x + (relation === 'partner' ? 240 : relation === 'sibling' ? 210 : 0), y = selected.y + (relation === 'parent' ? -190 : relation === 'child' ? 195 : 0);
@@ -190,7 +214,7 @@ $('resetTree').addEventListener('click', () => { if (!confirm('Reset the tree to
 $('mobileMenu').addEventListener('click', () => { $('sidebar').classList.add('mobile-open'); $('sidebarScrim').classList.add('open'); }); $('sidebarScrim').addEventListener('click', closeMobileNav);
 
 function toast(message) { const el = $('toast'); el.textContent = message; el.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => el.classList.remove('show'), 2200); }
-window.addEventListener('keydown', (event) => { if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); setView('tree'); $('searchInput').focus(); } if (event.key === 'Escape') { closePhotoViewer(); closePersonModal(); $('settingsModal').classList.remove('open'); $('familyMenu').classList.remove('open'); closeMobileNav(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.shiftKey ? $('redoButton') : $('undoButton')).click(); } });
+window.addEventListener('keydown', (event) => { if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); setView('tree'); $('searchInput').focus(); } if (event.key === 'Escape') { closePhotoViewer(); closeConnectionModal(); closePersonModal(); $('settingsModal').classList.remove('open'); $('familyMenu').classList.remove('open'); closeMobileNav(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.shiftKey ? $('redoButton') : $('undoButton')).click(); } });
 document.addEventListener('click', (event) => { if (!event.target.closest('.family-switcher')) { $('familyMenu').classList.remove('open'); $('familyName').setAttribute('aria-expanded', 'false'); } });
 
 render();
