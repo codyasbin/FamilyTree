@@ -32,7 +32,7 @@ Codyasbin lets you:
 - Record birth years, locations, biographies, notes, and sources.
 - Upload portraits and open them in a full-size viewer.
 - Organize relatives into clans and family groups.
-- Rename groups and move people between family branches.
+- Create, rename, and delete groups, and move people between family branches.
 - Browse everyone in a directory or chronological timeline.
 - Search, zoom, pan, and automatically arrange the tree.
 - Import or export the complete family tree as a JSON file.

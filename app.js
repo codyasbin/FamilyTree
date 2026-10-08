@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'kinship-family-tree-v1';
 const defaultState = {
   family: 'The Whitmore family', settings: { showTips: true }, selectedId: 'eleanor',
+  groups: ['Whitmore roots', 'The Whitmore family', 'The Mercer family'],
   nodes: [
     { id: 'arthur', name: 'Arthur Whitmore', birth: '1912', death: '1988', location: 'York, England', about: 'A quiet builder with a love of old maps.', x: 205, y: 205, clan: 'Whitmore roots', color: 'yellow' },
     { id: 'margaret', name: 'Margaret Whitmore', birth: '1918', death: '2003', location: 'York, England', about: '', x: 435, y: 205, clan: 'Whitmore roots', color: 'lavender' },
@@ -22,7 +23,11 @@ function normalizeState(data) {
   const family = String(data.family || 'My family');
   const nodes = data.nodes.map((node) => ({ ...node }));
   if (family !== defaultState.family) nodes.forEach((node) => { if (node.clan === defaultState.family) node.clan = family; });
-  return { family, settings: { ...defaultState.settings, ...(data.settings || {}) }, selectedId: data.selectedId, nodes, relations: data.relations };
+  const savedGroups = (Array.isArray(data.groups) ? data.groups : []).map((name) => family !== defaultState.family && name === defaultState.family ? family : name);
+  const groups = [...new Set([...savedGroups, ...nodes.map((node) => node.clan).filter(Boolean)])]
+    .map((name) => String(name).trim()).filter(Boolean);
+  if (!groups.length) groups.push(family);
+  return { family, settings: { ...defaultState.settings, ...(data.settings || {}) }, selectedId: data.selectedId, groups, nodes, relations: data.relations };
 }
 function loadState() { try { return normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch { return clone(defaultState); } }
 
@@ -31,11 +36,15 @@ let currentView = 'tree';
 let view = { x: -30, y: -85, scale: .93, panning: false, startX: 0, startY: 0, originX: 0, originY: 0 };
 let history = [clone(state)], historyIndex = 0;
 const nodeLayer = $('nodeLayer'), connectorLayer = $('connectorLayer'), groupLayer = $('groupLayer'), world = $('canvasWorld'), viewport = $('canvasViewport');
+const clanField = document.createElement('label');
+clanField.innerHTML = 'Clan or group<select id="detailClan"></select>';
+$('detailLocation').closest('label').before(clanField);
 
 function saveState() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 function snapshot() { history = history.slice(0, historyIndex + 1); history.push(clone(state)); historyIndex++; saveState(); updateHistoryButtons(); }
 function initials(name = '') { return name.split(/\s+/).filter(Boolean).map((word) => word[0]).slice(0, 2).join('').toUpperCase() || '?'; }
 function person(id) { return state.nodes.find((item) => item.id === id); }
+function groupOptions(selected = '') { return state.groups.map((name) => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join(''); }
 function relatives(id) {
   return state.relations.filter((r) => r[0] === id || r[1] === id).map((r) => {
     const isFirst = r[0] === id, other = isFirst ? r[1] : r[0];
@@ -72,7 +81,7 @@ function renderGroups() {
 }
 function renderInspector() {
   const selected = person(state.selectedId) || state.nodes[0]; if (!selected) { $('inspector').classList.add('hidden'); return; }
-  state.selectedId = selected.id; $('inspectorName').textContent = selected.name; $('detailName').value = selected.name; $('detailBirth').value = selected.birth || ''; $('detailDeath').value = selected.death || ''; $('detailLocation').value = selected.location || ''; $('detailAbout').value = selected.about || ''; $('detailNotes').value = selected.notes || ''; $('detailSources').value = selected.sources || '';
+  state.selectedId = selected.id; $('inspectorName').textContent = selected.name; $('detailName').value = selected.name; $('detailBirth').value = selected.birth || ''; $('detailDeath').value = selected.death || ''; $('detailClan').innerHTML = groupOptions(selected.clan); $('detailLocation').value = selected.location || ''; $('detailAbout').value = selected.about || ''; $('detailNotes').value = selected.notes || ''; $('detailSources').value = selected.sources || '';
   $('inspectorDates').textContent = `${selected.birth || 'Unknown'} — ${selected.death || 'present'}`; $('livingLabel').innerHTML = selected.death ? '<i></i> Remembered' : '<i></i> Living';
   const photo = $('profilePhoto'); photo.innerHTML = selected.photo ? `<img src="${escapeHtml(selected.photo)}" alt="${escapeHtml(selected.name)}">` : escapeHtml(initials(selected.name));
   const links = relatives(selected.id); $('connectionList').innerHTML = links.length ? links.map(({ person: related, type }) => `<button class="connection-row" data-person-id="${escapeHtml(related.id)}"><div class="connection-avatar">${escapeHtml(initials(related.name))}</div><div><strong>${escapeHtml(related.name)}</strong><span>${escapeHtml(type)}</span></div></button>`).join('') : '<div class="empty-connections">No connections yet.</div>';
@@ -103,12 +112,13 @@ function setView(name) {
 function renderContentView() {
   const body = $('contentBody');
   if (currentView === 'people') {
-    $('contentEyebrow').textContent = 'Family directory'; $('contentTitle').textContent = 'People'; $('contentSubtitle').textContent = `${state.nodes.length} people in ${state.family}`; $('contentAddButton').hidden = false;
+    $('contentEyebrow').textContent = 'Family directory'; $('contentTitle').textContent = 'People'; $('contentSubtitle').textContent = `${state.nodes.length} people in ${state.family}`; $('contentAddButton').hidden = false; $('contentAddButton').innerHTML = '<span>+</span> Add person';
     body.innerHTML = `<div class="people-grid">${[...state.nodes].sort((a, b) => a.name.localeCompare(b.name)).map((n) => `<button class="person-list-card" data-person-id="${escapeHtml(n.id)}"><div class="large-avatar ${escapeHtml(n.color || 'mint')}">${n.photo ? `<img src="${escapeHtml(n.photo)}" alt="">` : escapeHtml(initials(n.name))}</div><div><h3>${escapeHtml(n.name)}</h3><p>${escapeHtml(n.birth || 'Unknown')} — ${escapeHtml(n.death || 'present')}</p><span>${escapeHtml(n.location || 'Location unknown')}</span></div><b>View</b></button>`).join('')}</div>`;
   } else if (currentView === 'groups') {
-    const groups = Object.entries(state.nodes.reduce((all, node) => { (all[node.clan || 'Ungrouped'] ||= []).push(node); return all; }, {}));
+    const groups = state.groups.map((name) => [name, state.nodes.filter((node) => node.clan === name)]);
     $('contentEyebrow').textContent = 'Family branches'; $('contentTitle').textContent = 'Clans & groups'; $('contentSubtitle').textContent = `${groups.length} branches keep this tree organized`; $('contentAddButton').hidden = true;
-    body.innerHTML = `<div class="group-grid">${groups.map(([name, nodes]) => `<article class="group-card"><div class="group-card-head"><span>${nodes.length} ${nodes.length === 1 ? 'person' : 'people'}</span><button class="group-edit" data-edit-group="${escapeHtml(name)}">Rename</button></div><h3>${escapeHtml(name)}</h3><p>Choose a person to move them to another group.</p><div class="group-people">${nodes.map((n) => `<button data-move-person="${escapeHtml(n.id)}" title="Move ${escapeHtml(n.name)}">${escapeHtml(initials(n.name))}<small>${escapeHtml(n.name)}</small></button>`).join('')}</div></article>`).join('')}</div>`;
+    $('contentAddButton').hidden = false; $('contentAddButton').innerHTML = '<span>+</span> Add group';
+    body.innerHTML = `<div class="group-grid">${groups.map(([name, nodes]) => `<article class="group-card"><div class="group-card-head"><span>${nodes.length} ${nodes.length === 1 ? 'person' : 'people'}</span><button class="group-edit" data-edit-group="${escapeHtml(name)}">Manage</button></div><h3>${escapeHtml(name)}</h3><p>Choose a person to move them to another group.</p><div class="group-people">${nodes.map((n) => `<button data-move-person="${escapeHtml(n.id)}" title="Move ${escapeHtml(n.name)}">${escapeHtml(initials(n.name))}<small>${escapeHtml(n.name)}</small></button>`).join('') || '<span class="empty-connections">No people yet</span>'}</div></article>`).join('')}</div>`;
   } else {
     const dated = [...state.nodes].filter((n) => /^\d{4}$/.test(n.birth)).sort((a, b) => Number(a.birth) - Number(b.birth));
     $('contentEyebrow').textContent = 'Across generations'; $('contentTitle').textContent = 'Timeline'; $('contentSubtitle').textContent = 'Births and lives in chronological order'; $('contentAddButton').hidden = true;
@@ -116,25 +126,34 @@ function renderContentView() {
   }
   body.querySelectorAll('[data-person-id]').forEach((button) => button.addEventListener('click', () => { state.selectedId = button.dataset.personId; setView('tree'); render(); }));
   body.querySelectorAll('[data-edit-group]').forEach((button) => button.addEventListener('click', () => {
-    const oldName = button.dataset.editGroup;
-    const newName = prompt('Rename this clan or group:', oldName)?.trim();
-    if (!newName || newName === oldName) return;
-    state.nodes.forEach((node) => { if ((node.clan || 'Ungrouped') === oldName) node.clan = newName; });
-    snapshot(); render(); toast(`Group renamed to ${newName}`);
+    openGroupModal(button.dataset.editGroup);
   }));
   body.querySelectorAll('[data-move-person]').forEach((button) => button.addEventListener('click', () => {
     const member = person(button.dataset.movePerson);
-    const choices = [...new Set(state.nodes.map((node) => node.clan || 'Ungrouped'))].join(', ');
+    const choices = state.groups.join(', ');
     const newGroup = prompt(`Move ${member.name} to which group?\nExisting groups: ${choices}`, member.clan || 'Ungrouped')?.trim();
     if (!newGroup || newGroup === (member.clan || 'Ungrouped')) return;
-    member.clan = newGroup;
-    snapshot(); render(); toast(`${member.name} moved to ${newGroup}`);
+    const matchedGroup = state.groups.find((group) => group.toLowerCase() === newGroup.toLowerCase());
+    if (!matchedGroup) return toast('Choose an existing group or create it first');
+    member.clan = matchedGroup;
+    snapshot(); render(); toast(`${member.name} moved to ${matchedGroup}`);
   }));
 }
 
 function zoomAt(factor) { view.scale = Math.max(.35, Math.min(1.8, view.scale * factor)); applyView(); }
-function openPersonModal() { $('personModal').classList.add('open'); setTimeout(() => $('personForm').elements.name.focus(), 50); }
+function openPersonModal() { const selected = person(state.selectedId); $('personClan').innerHTML = groupOptions(selected?.clan || state.groups[0]); $('personModal').classList.add('open'); setTimeout(() => $('personForm').elements.name.focus(), 50); }
 function closePersonModal() { $('personModal').classList.remove('open'); }
+function openGroupModal(name = '') {
+  $('groupOriginalName').value = name;
+  $('groupName').value = name;
+  $('groupModalTitle').textContent = name ? 'Manage group' : 'Create a group';
+  $('groupModalDescription').textContent = name ? 'Rename this group or remove it from the family tree.' : 'Add a clan or family group to organize people.';
+  $('saveGroupButton').textContent = name ? 'Save changes' : 'Create group';
+  $('deleteGroupButton').hidden = !name;
+  $('groupModal').classList.add('open');
+  setTimeout(() => $('groupName').focus(), 30);
+}
+function closeGroupModal() { $('groupModal').classList.remove('open'); }
 function closeMobileNav() { $('sidebar').classList.remove('mobile-open'); $('sidebarScrim').classList.remove('open'); }
 function openConnectionModal() {
   const selected = person(state.selectedId);
@@ -157,7 +176,7 @@ $('zoomInButton').addEventListener('click', () => zoomAt(1.12)); $('zoomOutButto
 $('fitButton').addEventListener('click', () => { view = { ...view, x: 35, y: 42, scale: .76 }; applyView(); });
 $('searchInput').addEventListener('input', renderNodes);
 document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
-$('addPersonButton').addEventListener('click', openPersonModal); $('contentAddButton').addEventListener('click', openPersonModal); $('addRelationButton').addEventListener('click', openConnectionModal);
+$('addPersonButton').addEventListener('click', openPersonModal); $('contentAddButton').addEventListener('click', () => currentView === 'groups' ? openGroupModal() : openPersonModal()); $('addRelationButton').addEventListener('click', openConnectionModal);
 document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', closePersonModal)); $('personModal').addEventListener('click', (event) => { if (event.target === $('personModal')) closePersonModal(); });
 $('connectionForm').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -169,14 +188,38 @@ $('connectionForm').addEventListener('submit', (event) => {
 });
 document.querySelectorAll('[data-close-connection]').forEach((button) => button.addEventListener('click', closeConnectionModal));
 $('connectionModal').addEventListener('click', (event) => { if (event.target === $('connectionModal')) closeConnectionModal(); });
+$('groupForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const original = $('groupOriginalName').value;
+  const name = $('groupName').value.trim();
+  if (!name) return;
+  if (state.groups.some((group) => group.toLowerCase() === name.toLowerCase() && group !== original)) return toast('A group with that name already exists');
+  if (original) {
+    state.groups[state.groups.indexOf(original)] = name;
+    state.nodes.forEach((node) => { if (node.clan === original) node.clan = name; });
+  } else state.groups.push(name);
+  snapshot(); closeGroupModal(); render(); toast(original ? `Group renamed to ${name}` : `${name} created`);
+});
+$('deleteGroupButton').addEventListener('click', () => {
+  const name = $('groupOriginalName').value;
+  if (!name || state.groups.length <= 1) return toast('Your tree needs at least one group');
+  const members = state.nodes.filter((node) => node.clan === name);
+  const replacement = state.groups.find((group) => group !== name);
+  if (!confirm(`Delete ${name}?${members.length ? ` Its ${members.length} ${members.length === 1 ? 'person' : 'people'} will move to ${replacement}.` : ''}`)) return;
+  state.groups = state.groups.filter((group) => group !== name);
+  members.forEach((node) => { node.clan = replacement; });
+  snapshot(); closeGroupModal(); render(); toast(`${name} deleted`);
+});
+document.querySelectorAll('[data-close-group]').forEach((button) => button.addEventListener('click', closeGroupModal));
+$('groupModal').addEventListener('click', (event) => { if (event.target === $('groupModal')) closeGroupModal(); });
 $('personForm').addEventListener('submit', (event) => {
   event.preventDefault(); const data = new FormData(event.currentTarget), name = data.get('name').trim(), selected = person(state.selectedId) || state.nodes[0], relation = data.get('relation'), id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
   const x = selected.x + (relation === 'partner' ? 240 : relation === 'sibling' ? 210 : 0), y = selected.y + (relation === 'parent' ? -190 : relation === 'child' ? 195 : 0);
-  state.nodes.push({ id, name, birth: data.get('birth').trim(), death: '', location: data.get('location').trim(), about: '', x, y, clan: selected.clan, color: ['mint', 'coral', 'yellow', 'lavender'][state.nodes.length % 4] });
+  state.nodes.push({ id, name, birth: data.get('birth').trim(), death: '', location: data.get('location').trim(), about: '', x, y, clan: data.get('clan') || selected.clan || state.groups[0], color: ['mint', 'coral', 'yellow', 'lavender'][state.nodes.length % 4] });
   if (relation === 'parent') state.relations.push([id, selected.id, 'parent']); else if (relation === 'child') state.relations.push([selected.id, id, 'parent']); else state.relations.push([selected.id, id, relation]);
   state.selectedId = id; snapshot(); event.currentTarget.reset(); closePersonModal(); setView('tree'); render(); toast(`${name} added to your tree`);
 });
-$('saveDetails').addEventListener('click', () => { const item = person(state.selectedId); Object.assign(item, { name: $('detailName').value.trim() || item.name, birth: $('detailBirth').value.trim(), death: $('detailDeath').value.trim(), location: $('detailLocation').value.trim(), about: $('detailAbout').value.trim() }); snapshot(); render(); toast('Details saved locally'); });
+$('saveDetails').addEventListener('click', () => { const item = person(state.selectedId); Object.assign(item, { name: $('detailName').value.trim() || item.name, birth: $('detailBirth').value.trim(), death: $('detailDeath').value.trim(), clan: $('detailClan').value, location: $('detailLocation').value.trim(), about: $('detailAbout').value.trim() }); snapshot(); render(); toast('Details saved locally'); });
 $('saveNotes').addEventListener('click', () => { person(state.selectedId).notes = $('detailNotes').value.trim(); snapshot(); toast('Notes saved locally'); });
 $('saveSources').addEventListener('click', () => { person(state.selectedId).sources = $('detailSources').value.trim(); snapshot(); toast('Sources saved locally'); });
 $('deletePerson').addEventListener('click', () => { if (state.nodes.length <= 1) return toast('Your tree needs at least one person'); if (!confirm('Remove this person and their connections?')) return; const removed = state.selectedId; state.nodes = state.nodes.filter((n) => n.id !== removed); state.relations = state.relations.filter((r) => r[0] !== removed && r[1] !== removed); state.selectedId = state.nodes[0].id; snapshot(); render(); toast('Person removed'); });
@@ -203,6 +246,7 @@ $('settingsForm').addEventListener('submit', (event) => {
   const nextFamily = $('settingsFamilyName').value.trim() || previousFamily;
   state.family = nextFamily;
   state.nodes.forEach((node) => { if (node.clan === previousFamily || node.clan === defaultState.family) node.clan = nextFamily; });
+  state.groups = [...new Set(state.groups.map((group) => group === previousFamily || group === defaultState.family ? nextFamily : group))];
   state.settings.showTips = $('showTips').checked;
   snapshot();
   $('settingsModal').classList.remove('open');
@@ -214,7 +258,7 @@ $('resetTree').addEventListener('click', () => { if (!confirm('Reset the tree to
 $('mobileMenu').addEventListener('click', () => { $('sidebar').classList.add('mobile-open'); $('sidebarScrim').classList.add('open'); }); $('sidebarScrim').addEventListener('click', closeMobileNav);
 
 function toast(message) { const el = $('toast'); el.textContent = message; el.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => el.classList.remove('show'), 2200); }
-window.addEventListener('keydown', (event) => { if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); setView('tree'); $('searchInput').focus(); } if (event.key === 'Escape') { closePhotoViewer(); closeConnectionModal(); closePersonModal(); $('settingsModal').classList.remove('open'); $('familyMenu').classList.remove('open'); closeMobileNav(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.shiftKey ? $('redoButton') : $('undoButton')).click(); } });
+window.addEventListener('keydown', (event) => { if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) { event.preventDefault(); setView('tree'); $('searchInput').focus(); } if (event.key === 'Escape') { closePhotoViewer(); closeConnectionModal(); closePersonModal(); closeGroupModal(); $('settingsModal').classList.remove('open'); $('familyMenu').classList.remove('open'); closeMobileNav(); } if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.shiftKey ? $('redoButton') : $('undoButton')).click(); } });
 document.addEventListener('click', (event) => { if (!event.target.closest('.family-switcher')) { $('familyMenu').classList.remove('open'); $('familyName').setAttribute('aria-expanded', 'false'); } });
 
 render();
