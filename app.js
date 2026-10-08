@@ -65,14 +65,18 @@ function renderNodes() {
     card.dataset.id = item.id; card.tabIndex = 0; card.style.left = `${item.x}px`; card.style.top = `${item.y}px`;
     card.innerHTML = `<div class="node-avatar ${escapeHtml(item.color || 'mint')}">${item.photo ? `<img src="${escapeHtml(item.photo)}" alt="">` : escapeHtml(initials(item.name))}</div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.birth || '—')} — ${escapeHtml(item.death || 'present')}</p><span class="node-tag">${escapeHtml(item.clan || 'Family')}</span>`;
     card.addEventListener('pointerdown', startNodeDrag);
-    card.addEventListener('click', () => selectPerson(item.id));
+    card.addEventListener('click', () => { if (!card.dataset.suppressClick) selectPerson(item.id); });
     card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectPerson(item.id); } });
     nodeLayer.appendChild(card);
   });
 }
 function renderConnections() {
   connectorLayer.innerHTML = ''; const nodes = new Map(state.nodes.map((item) => [item.id, item]));
-  state.relations.forEach(([aId, bId]) => { const a = nodes.get(aId), b = nodes.get(bId); if (!a || !b) return; const ax = a.x + 83, ay = a.y + 39, bx = b.x + 83, by = b.y + 39, midY = ay + (by - ay) / 2; const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', `M ${ax} ${ay} C ${ax} ${midY}, ${bx} ${midY}, ${bx} ${by}`); if (a.id === state.selectedId || b.id === state.selectedId) path.classList.add('highlight'); connectorLayer.appendChild(path); });
+  state.relations.forEach(([aId, bId]) => { const a = nodes.get(aId), b = nodes.get(bId); if (!a || !b) return; const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.dataset.a = aId; path.dataset.b = bId; if (a.id === state.selectedId || b.id === state.selectedId) path.classList.add('highlight'); connectorLayer.appendChild(path); });
+  updateConnectionPositions();
+}
+function updateConnectionPositions() {
+  connectorLayer.querySelectorAll('path').forEach((path) => { const a = person(path.dataset.a), b = person(path.dataset.b); if (!a || !b) return; const ax = a.x + 83, ay = a.y + 39, bx = b.x + 83, by = b.y + 39, midY = ay + (by - ay) / 2; path.setAttribute('d', `M ${ax} ${ay} C ${ax} ${midY}, ${bx} ${midY}, ${bx} ${by}`); });
 }
 function renderGroups() {
   groupLayer.innerHTML = ''; const groups = {};
@@ -94,16 +98,20 @@ function applyView() { world.style.transform = `translate(${view.x}px, ${view.y}
 function selectPerson(id) { state.selectedId = id; if (currentView === 'tree') $('inspector').classList.remove('hidden'); render(); }
 
 function startNodeDrag(event) {
-  if (event.button !== 0) return; const card = event.currentTarget, item = person(card.dataset.id), start = { x: event.clientX, y: event.clientY, nodeX: item.x, nodeY: item.y }; let moved = false;
+  if (event.button !== 0) return; event.preventDefault(); const card = event.currentTarget, item = person(card.dataset.id), start = { x: event.clientX, y: event.clientY, nodeX: item.x, nodeY: item.y }; let moved = false, frame = 0;
   card.setPointerCapture(event.pointerId);
-  const move = (e) => { if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 3) moved = true; item.x = start.nodeX + (e.clientX - start.x) / view.scale; item.y = start.nodeY + (e.clientY - start.y) / view.scale; card.style.left = `${item.x}px`; card.style.top = `${item.y}px`; renderConnections(); renderGroups(); renderMinimap(); };
-  const end = () => { card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', end); if (moved) snapshot(); };
-  card.addEventListener('pointermove', move); card.addEventListener('pointerup', end);
+  card.classList.add('is-dragging'); document.body.classList.add('is-node-dragging');
+  const move = (e) => { if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 3) moved = true; item.x = start.nodeX + (e.clientX - start.x) / view.scale; item.y = start.nodeY + (e.clientY - start.y) / view.scale; if (!frame) frame = requestAnimationFrame(() => { frame = 0; card.style.left = `${item.x}px`; card.style.top = `${item.y}px`; updateConnectionPositions(); }); };
+  const end = () => { card.removeEventListener('pointermove', move); card.removeEventListener('pointerup', end); card.removeEventListener('pointercancel', end); card.removeEventListener('lostpointercapture', end); if (frame) cancelAnimationFrame(frame); card.style.left = `${item.x}px`; card.style.top = `${item.y}px`; card.classList.remove('is-dragging'); document.body.classList.remove('is-node-dragging'); if (moved) { card.dataset.suppressClick = 'true'; requestAnimationFrame(() => delete card.dataset.suppressClick); updateConnectionPositions(); renderGroups(); renderMinimap(); snapshot(); } };
+  card.addEventListener('pointermove', move); card.addEventListener('pointerup', end); card.addEventListener('pointercancel', end); card.addEventListener('lostpointercapture', end);
 }
-viewport.addEventListener('pointerdown', (event) => { if (event.target.closest('.node-card') || event.button !== 0) return; view.panning = true; view.startX = event.clientX; view.startY = event.clientY; view.originX = view.x; view.originY = view.y; viewport.classList.add('is-panning'); viewport.setPointerCapture(event.pointerId); });
-viewport.addEventListener('pointermove', (event) => { if (!view.panning) return; view.x = view.originX + event.clientX - view.startX; view.y = view.originY + event.clientY - view.startY; applyView(); });
-viewport.addEventListener('pointerup', () => { view.panning = false; viewport.classList.remove('is-panning'); });
-viewport.addEventListener('pointercancel', () => { view.panning = false; viewport.classList.remove('is-panning'); });
+let panFrame = 0;
+viewport.addEventListener('pointerdown', (event) => { if (event.target.closest('.node-card') || event.button !== 0) return; event.preventDefault(); view.panning = true; view.startX = event.clientX; view.startY = event.clientY; view.originX = view.x; view.originY = view.y; viewport.classList.add('is-panning'); document.body.classList.add('is-canvas-panning'); viewport.setPointerCapture(event.pointerId); });
+viewport.addEventListener('pointermove', (event) => { if (!view.panning) return; view.x = view.originX + event.clientX - view.startX; view.y = view.originY + event.clientY - view.startY; if (!panFrame) panFrame = requestAnimationFrame(() => { panFrame = 0; applyView(); }); });
+function endCanvasPan() { if (!view.panning) return; view.panning = false; if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; applyView(); } viewport.classList.remove('is-panning'); document.body.classList.remove('is-canvas-panning'); }
+viewport.addEventListener('pointerup', endCanvasPan);
+viewport.addEventListener('pointercancel', endCanvasPan);
+viewport.addEventListener('lostpointercapture', endCanvasPan);
 viewport.addEventListener('wheel', (event) => { event.preventDefault(); const rect = viewport.getBoundingClientRect(), mouseX = event.clientX - rect.left, mouseY = event.clientY - rect.top, old = view.scale, next = Math.max(.35, Math.min(1.8, old * (event.deltaY > 0 ? .92 : 1.08))); view.x = mouseX - ((mouseX - view.x) / old) * next; view.y = mouseY - ((mouseY - view.y) / old) * next; view.scale = next; applyView(); }, { passive: false });
 
 function setView(name) {
@@ -225,7 +233,7 @@ $('saveSources').addEventListener('click', () => { person(state.selectedId).sour
 $('deletePerson').addEventListener('click', () => { if (state.nodes.length <= 1) return toast('Your tree needs at least one person'); if (!confirm('Remove this person and their connections?')) return; const removed = state.selectedId; state.nodes = state.nodes.filter((n) => n.id !== removed); state.relations = state.relations.filter((r) => r[0] !== removed && r[1] !== removed); state.selectedId = state.nodes[0].id; snapshot(); render(); toast('Person removed'); });
 $('photoUploadButton').addEventListener('click', () => $('photoInput').click()); $('photoInput').addEventListener('change', (event) => { const file = event.target.files[0]; if (!file) return; if (!file.type.startsWith('image/')) return toast('Please choose an image file'); if (file.size > 2_000_000) return toast('Please choose an image under 2 MB'); const reader = new FileReader(); reader.onload = () => { person(state.selectedId).photo = reader.result; snapshot(); render(); toast('Portrait updated'); }; reader.readAsDataURL(file); event.target.value = ''; });
 $('profilePhoto').addEventListener('click', () => { const selected = person(state.selectedId); if (selected?.photo) openPhotoViewer(selected.photo, selected.name); });
-$('nodeLayer').addEventListener('click', (event) => { const image = event.target.closest('.node-avatar img'); if (!image) return; event.stopPropagation(); const selected = person(image.closest('.node-card').dataset.id); openPhotoViewer(selected.photo, selected.name); });
+$('nodeLayer').addEventListener('click', (event) => { const image = event.target.closest('.node-avatar img'); if (!image) return; const card = image.closest('.node-card'); if (card.dataset.suppressClick) return; event.stopPropagation(); const selected = person(card.dataset.id); openPhotoViewer(selected.photo, selected.name); });
 $('contentBody').addEventListener('click', (event) => { const image = event.target.closest('.large-avatar img'); if (!image) return; event.stopPropagation(); const selected = person(image.closest('[data-person-id]').dataset.personId); openPhotoViewer(selected.photo, selected.name); });
 $('closePhotoViewer').addEventListener('click', closePhotoViewer); $('photoViewer').addEventListener('click', (event) => { if (event.target === $('photoViewer')) closePhotoViewer(); });
 $('exportButton').addEventListener('click', () => { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'codyasbin-family-tree.json'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0); toast('Tree exported'); });

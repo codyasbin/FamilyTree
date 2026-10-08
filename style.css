@@ -40,6 +40,12 @@ button:disabled { cursor: not-allowed; opacity: .35; }
 .profile-photo:has(img), .node-avatar:has(img), .large-avatar:has(img) { cursor: zoom-in; }
 .photo-viewer { position: fixed; display: none; place-items: center; inset: 0; padding: 58px 24px 28px; background: rgba(16,25,23,.88); backdrop-filter: blur(8px); z-index: 50; }.photo-viewer.open { display: grid; }.photo-viewer > button { position: absolute; top: 20px; right: 24px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.12); color: white; font-size: 28px; line-height: 1; }.photo-viewer figure { display: grid; justify-items: center; max-width: 100%; max-height: 100%; margin: 0; }.photo-viewer img { display: block; max-width: min(900px, 92vw); max-height: 78vh; border-radius: 14px; object-fit: contain; box-shadow: 0 25px 70px rgba(0,0,0,.38); }.photo-viewer figcaption { margin-top: 14px; color: white; font: 600 16px 'DM Sans', sans-serif; }
 [hidden] { display: none !important; }
+.canvas-viewport { touch-action: none; user-select: none; will-change: cursor; }
+.canvas-world { will-change: transform; }
+.node-card { cursor: grab; touch-action: none; will-change: left, top; }
+.node-card:active, .node-card.is-dragging { cursor: grabbing; transition: none; box-shadow: 0 12px 28px rgba(34,61,54,.2); }
+body.is-canvas-panning, body.is-canvas-panning * { cursor: grabbing !important; }
+body.is-node-dragging, body.is-node-dragging * { cursor: grabbing !important; }
 .detail-form select { width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid #e2e8e4; border-radius: 6px; outline: none; background: #fff; font-size: 12px; text-transform: none; letter-spacing: 0; }
 .detail-form select:focus { border-color: var(--mint-deep); }
 @media (max-width: 1080px) { .app-shell, .app-shell:has(.inspector.hidden) { grid-template-columns: 205px minmax(0, 1fr); } }
