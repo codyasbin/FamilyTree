@@ -115,7 +115,7 @@ viewport.addEventListener('lostpointercapture', endCanvasPan);
 viewport.addEventListener('wheel', (event) => { event.preventDefault(); const rect = viewport.getBoundingClientRect(), mouseX = event.clientX - rect.left, mouseY = event.clientY - rect.top, old = view.scale, next = Math.max(.35, Math.min(1.8, old * (event.deltaY > 0 ? .92 : 1.08))); view.x = mouseX - ((mouseX - view.x) / old) * next; view.y = mouseY - ((mouseY - view.y) / old) * next; view.scale = next; applyView(); }, { passive: false });
 
 function setView(name) {
-  currentView = name; const isTree = name === 'tree'; $('canvasStage').hidden = !isTree; $('contentView').hidden = isTree; $('inspector').classList.toggle('hidden', !isTree); document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); $('viewLabel').textContent = isTree ? '' : ` / ${name.charAt(0).toUpperCase() + name.slice(1)}`; closeMobileNav(); if (!isTree) renderContentView();
+  const changedView = currentView !== name; currentView = name; const isTree = name === 'tree'; $('canvasStage').hidden = !isTree; $('contentView').hidden = isTree; $('inspector').classList.toggle('hidden', !isTree); document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === name)); $('viewLabel').textContent = isTree ? '' : ` / ${name.charAt(0).toUpperCase() + name.slice(1)}`; closeMobileNav(); if (!isTree) { renderContentView(); if (changedView) $('contentView').scrollTop = 0; }
 }
 function renderContentView() {
   const body = $('contentBody');
