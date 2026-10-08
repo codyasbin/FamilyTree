@@ -149,6 +149,67 @@ function renderContentView() {
 }
 
 function zoomAt(factor) { view.scale = Math.max(.35, Math.min(1.8, view.scale * factor)); applyView(); }
+function fitTreeToViewport() {
+  if (!state.nodes.length) return;
+  const minX = Math.min(...state.nodes.map((node) => node.x)), maxX = Math.max(...state.nodes.map((node) => node.x + 166));
+  const minY = Math.min(...state.nodes.map((node) => node.y)), maxY = Math.max(...state.nodes.map((node) => node.y + 90));
+  const padding = 70, width = Math.max(1, maxX - minX), height = Math.max(1, maxY - minY);
+  view.scale = Math.max(.35, Math.min(1.2, (viewport.clientWidth - padding * 2) / width, (viewport.clientHeight - padding * 2) / height));
+  view.x = (viewport.clientWidth - width * view.scale) / 2 - minX * view.scale;
+  view.y = (viewport.clientHeight - height * view.scale) / 2 - minY * view.scale;
+  applyView();
+}
+function autoLayoutTree() {
+  const nodes = [...state.nodes].sort((a, b) => (Number(a.birth) || 9999) - (Number(b.birth) || 9999) || a.name.localeCompare(b.name));
+  const ids = new Set(nodes.map((node) => node.id));
+  const parent = new Map(nodes.map((node) => [node.id, node.id]));
+  const find = (id) => { let root = id; while (parent.get(root) !== root) root = parent.get(root); while (parent.get(id) !== id) { const next = parent.get(id); parent.set(id, root); id = next; } return root; };
+  const unite = (a, b) => { const aRoot = find(a), bRoot = find(b); if (aRoot !== bRoot) parent.set(bRoot, aRoot); };
+
+  state.relations.forEach(([a, b, type]) => { if (ids.has(a) && ids.has(b) && (type === 'partner' || type === 'sibling')) unite(a, b); });
+
+  const units = new Map();
+  nodes.forEach((node) => { const root = find(node.id); if (!units.has(root)) units.set(root, []); units.get(root).push(node); });
+  const unitOf = new Map(nodes.map((node) => [node.id, find(node.id)]));
+  const children = new Map([...units.keys()].map((id) => [id, new Set()]));
+  const parents = new Map([...units.keys()].map((id) => [id, new Set()]));
+  state.relations.forEach(([a, b, type]) => { if (type !== 'parent' || !unitOf.has(a) || !unitOf.has(b)) return; const from = unitOf.get(a), to = unitOf.get(b); if (from === to) return; children.get(from).add(to); parents.get(to).add(from); });
+
+  const level = new Map([...units.keys()].map((id) => [id, 0]));
+  const indegree = new Map([...units.keys()].map((id) => [id, parents.get(id).size]));
+  const queue = [...units.keys()].filter((id) => indegree.get(id) === 0).sort();
+  const visited = new Set();
+  while (queue.length) {
+    const current = queue.shift(); visited.add(current);
+    children.get(current).forEach((child) => { level.set(child, Math.max(level.get(child), level.get(current) + 1)); indegree.set(child, indegree.get(child) - 1); if (indegree.get(child) === 0) queue.push(child); });
+  }
+  // Malformed cyclic relationships stay together on a final safe row instead of making the layout diverge.
+  const maxResolvedLevel = Math.max(0, ...[...visited].map((id) => level.get(id)));
+  units.forEach((_, id) => { if (!visited.has(id)) level.set(id, maxResolvedLevel + 1); });
+
+  const rows = new Map();
+  units.forEach((members, id) => { const row = level.get(id); if (!rows.has(row)) rows.set(row, []); rows.get(row).push(id); members.sort((a, b) => (Number(a.birth) || 9999) - (Number(b.birth) || 9999) || a.name.localeCompare(b.name)); });
+  const unitCenter = new Map();
+  const horizontalGap = 220, verticalGap = 190, top = 145;
+  const widestRow = Math.max(1, ...[...rows.values()].map((unitIds) => unitIds.reduce((sum, id) => sum + units.get(id).length, 0)));
+  [...rows.keys()].sort((a, b) => a - b).forEach((row) => {
+    const unitIds = rows.get(row);
+    unitIds.sort((a, b) => {
+      const parentCenters = (id) => [...parents.get(id)].map((parentId) => unitCenter.get(parentId)).filter(Number.isFinite);
+      const aCenters = parentCenters(a), bCenters = parentCenters(b);
+      const aOrder = aCenters.length ? aCenters.reduce((sum, value) => sum + value, 0) / aCenters.length : Infinity;
+      const bOrder = bCenters.length ? bCenters.reduce((sum, value) => sum + value, 0) / bCenters.length : Infinity;
+      return aOrder - bOrder || units.get(a)[0].name.localeCompare(units.get(b)[0].name);
+    });
+    const peopleInRow = unitIds.reduce((sum, id) => sum + units.get(id).length, 0);
+    let column = (widestRow - peopleInRow) / 2;
+    unitIds.forEach((id) => {
+      const members = units.get(id), firstColumn = column;
+      members.forEach((node) => { node.x = 120 + column * horizontalGap; node.y = top + row * verticalGap; column += 1; });
+      unitCenter.set(id, 120 + (firstColumn + (members.length - 1) / 2) * horizontalGap);
+    });
+  });
+}
 function openPersonModal() { const selected = person(state.selectedId); $('personClan').innerHTML = groupOptions(selected?.clan || state.groups[0]); $('personModal').classList.add('open'); setTimeout(() => $('personForm').elements.name.focus(), 50); }
 function closePersonModal() { $('personModal').classList.remove('open'); }
 function openGroupModal(name = '') {
@@ -181,7 +242,7 @@ function openPhotoViewer(src, name) { if (!src) return; $('fullSizePhoto').src =
 function closePhotoViewer() { $('photoViewer').classList.remove('open'); $('fullSizePhoto').removeAttribute('src'); }
 
 $('zoomInButton').addEventListener('click', () => zoomAt(1.12)); $('zoomOutButton').addEventListener('click', () => zoomAt(.89));
-$('fitButton').addEventListener('click', () => { view = { ...view, x: 35, y: 42, scale: .76 }; applyView(); });
+$('fitButton').addEventListener('click', fitTreeToViewport);
 $('searchInput').addEventListener('input', renderNodes);
 document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
 $('addPersonButton').addEventListener('click', openPersonModal); $('contentAddButton').addEventListener('click', () => currentView === 'groups' ? openGroupModal() : openPersonModal()); $('addRelationButton').addEventListener('click', openConnectionModal);
@@ -238,7 +299,7 @@ $('contentBody').addEventListener('click', (event) => { const image = event.targ
 $('closePhotoViewer').addEventListener('click', closePhotoViewer); $('photoViewer').addEventListener('click', (event) => { if (event.target === $('photoViewer')) closePhotoViewer(); });
 $('exportButton').addEventListener('click', () => { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'codyasbin-family-tree.json'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0); toast('Tree exported'); });
 $('importButton').addEventListener('click', () => $('importFile').click()); $('importFile').addEventListener('change', (event) => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const incoming = JSON.parse(reader.result); if (!incoming.nodes?.every((n) => n.id && n.name && Number.isFinite(Number(n.x)) && Number.isFinite(Number(n.y))) || !Array.isArray(incoming.relations)) throw new Error(); state = normalizeState(incoming); history = [clone(state)]; historyIndex = 0; saveState(); render(); toast('Tree imported'); } catch { toast('That file could not be imported'); } }; reader.readAsText(file); event.target.value = ''; });
-$('layoutButton').addEventListener('click', () => { const levels = {}; state.nodes.forEach((node) => { const year = Number(node.birth) || 0, level = year ? Math.floor((year - 1900) / 25) : 0; (levels[level] ||= []).push(node); }); Object.values(levels).forEach((nodes, row) => nodes.forEach((node, col) => { node.x = 130 + col * 220; node.y = 160 + row * 190; })); snapshot(); render(); toast('Auto layout applied'); });
+$('layoutButton').addEventListener('click', () => { autoLayoutTree(); snapshot(); render(); fitTreeToViewport(); toast('Family relationships arranged'); });
 $('closeMinimap').addEventListener('click', () => $('minimap').classList.add('hidden'));
 $('closeInspector').addEventListener('click', () => $('inspector').classList.add('hidden'));
 $('undoButton').addEventListener('click', () => { if (historyIndex > 0) { state = clone(history[--historyIndex]); saveState(); render(); } }); $('redoButton').addEventListener('click', () => { if (historyIndex < history.length - 1) { state = clone(history[++historyIndex]); saveState(); render(); } });
